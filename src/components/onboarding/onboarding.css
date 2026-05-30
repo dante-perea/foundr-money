@@ -1,0 +1,97 @@
+/* Onboarding wizard motion — scoped to the flow. Shell/header/rail never move;
+   only the content column cross-fades + slides. All animation is disabled under
+   prefers-reduced-motion. These class names are used exclusively by the
+   onboarding components and don't touch the global theme. */
+
+@keyframes fm-step-forward {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fm-step-back {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fm-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fm-mark-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes fm-mark-ring {
+  from {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  to {
+    transform: scale(1.18);
+    opacity: 0;
+  }
+}
+
+.fm-step-in-forward {
+  animation: fm-step-forward 180ms ease-out;
+}
+
+.fm-step-in-back {
+  animation: fm-step-back 180ms ease-out;
+}
+
+.fm-row-in {
+  animation: fm-row-in 140ms ease-out;
+}
+
+.fm-success-mark {
+  animation: fm-mark-pop 220ms ease-out;
+  position: relative;
+}
+
+.fm-success-mark::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 9999px;
+  border: 2px solid var(--color-accent);
+  animation: fm-mark-ring 600ms ease-out 1 forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fm-step-in-forward,
+  .fm-step-in-back,
+  .fm-row-in,
+  .fm-success-mark {
+    animation: none;
+  }
+  .fm-success-mark::after {
+    display: none;
+  }
+}
