@@ -1,6 +1,7 @@
 import { clerkMiddleware } from '@clerk/nextjs/server'
+import { clerkMiddlewareOptions } from '@/lib/clerk-satellite'
 
-export default clerkMiddleware()
+export default clerkMiddleware(clerkMiddlewareOptions)
 
 export const config = {
   matcher: [
