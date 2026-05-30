@@ -4,15 +4,28 @@ import { ClerkProvider, UserButton } from '@clerk/nextjs'
 import { getOwnerId } from '@/lib/money/owner'
 import { ensureSeeded } from '@/lib/money/seed'
 import { Wordmark } from '@/components/brand/Wordmark'
+import {
+  clerkProviderProps,
+  CLERK_IS_SATELLITE,
+  CLERK_SATELLITE_DOMAIN,
+  SIGN_IN_URL,
+} from '@/lib/clerk-satellite'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const ownerId = await getOwnerId()
-  if (!ownerId) redirect('/sign-in')
+  if (!ownerId) {
+    // Satellite: bounce to the primary (foundr.company) sign-in and return here.
+    redirect(
+      CLERK_IS_SATELLITE
+        ? `${SIGN_IN_URL}?redirect_url=${encodeURIComponent(`https://${CLERK_SATELLITE_DOMAIN}/dashboard`)}`
+        : '/sign-in',
+    )
+  }
   // First visit: lazily provision a believable demo so the product is alive.
   await ensureSeeded(ownerId)
 
   return (
-    <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up" afterSignOutUrl="/">
+    <ClerkProvider {...clerkProviderProps} afterSignOutUrl="/">
     <div className="min-h-screen bg-bg-alt">
       <header className="border-b border-line bg-surface">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
