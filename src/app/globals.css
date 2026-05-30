@@ -2,7 +2,7 @@
 
 /* foundr.money brand — matches foundr.company: blue (#3b82f6) on white.
    Do NOT use the host repo's sage. Tailwind v4 @theme EXTENDS the default
-   palette, so slate-*/blue-* utilities remain available. */
+   palette, so the slate and blue utilities remain available. */
 @theme {
   --color-ink: #111827; /* slate-900 — body + headings */
   --color-subtle: #94a3b8; /* slate-400 — eyebrows, captions, "Soon" */
