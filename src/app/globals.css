@@ -1,22 +1,46 @@
 @import "tailwindcss";
 
+/* foundr.money brand — matches foundr.company: blue (#3b82f6) on white.
+   Do NOT use the host repo's sage. Tailwind v4 @theme EXTENDS the default
+   palette, so slate-*/blue-* utilities remain available. */
 @theme {
-  --color-slate-50: #f8fafc;
-  --color-slate-100: #f1f5f9;
-  --color-slate-200: #e2e8f0;
-  --color-slate-500: #64748b;
-  --color-slate-700: #334155;
-  --color-slate-800: #1e293b;
-  --color-slate-900: #0f172a;
+  --color-ink: #111827; /* slate-900 — body + headings */
+  --color-subtle: #94a3b8; /* slate-400 — eyebrows, captions, "Soon" */
+  --color-muted: #475569; /* slate-600 — secondary text/links */
+  --color-accent: #3b82f6; /* blue-500 — buttons, links, .money TLD */
+  --color-accent-hover: #2563eb; /* blue-600 */
+  --color-line: #e2e8f0; /* slate-200 — hairline borders */
+  --color-line-strong: #111827; /* ink — hover border */
+  --color-surface: #ffffff;
+  --color-bg: #ffffff;
+  --color-bg-alt: #f8fafc; /* slate-50 — alternating section bands */
+  --color-success: #16a34a; /* green-600 — Live */
+  --color-warning: #d97706; /* amber-600 — Beta */
+
+  --font-display: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-roboto), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-inconsolata), ui-monospace, monospace;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background: var(--color-slate-50);
-  color: var(--color-slate-900);
+  font-family: var(--font-sans);
+  background: var(--color-bg);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Tabular alignment for money figures */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
 }

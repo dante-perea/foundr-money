@@ -10,12 +10,19 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/gateway": "^3.0.121",
     "@clerk/nextjs": "^6.0.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@supabase/ssr": "^0.5.0",
     "@supabase/supabase-js": "^2.45.0",
+    "ai": "^6.0.193",
     "next": "^16.0.0",
+    "plaid": "^42.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "server-only": "^0.0.1",
+    "stripe": "^22.2.0",
+    "tailwind-merge": "^3.6.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
