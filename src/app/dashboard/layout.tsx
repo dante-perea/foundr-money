@@ -2,7 +2,8 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ClerkProvider, UserButton } from '@clerk/nextjs'
 import { getOwnerId } from '@/lib/money/owner'
-import { ensureSeeded } from '@/lib/money/seed'
+import { ensurePersonalProject } from '@/lib/money/projects'
+import { isOnboarded } from '@/lib/money/onboarding'
 import { Wordmark } from '@/components/brand/Wordmark'
 import {
   clerkProviderProps,
@@ -21,8 +22,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
         : '/sign-in',
     )
   }
-  // First visit: lazily provision a believable demo so the product is alive.
-  await ensureSeeded(ownerId)
+  // Every user needs the system Personal/Unallocated project for allocations.
+  await ensurePersonalProject(ownerId)
+  // New users go through onboarding instead of getting auto-seeded demo data.
+  if (!(await isOnboarded(ownerId))) redirect('/onboarding')
 
   return (
     <ClerkProvider {...clerkProviderProps} afterSignOutUrl="/">
