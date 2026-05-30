@@ -1,0 +1,134 @@
+name: lab-alias
+
+# When `experiment/<slug>` is pushed, GitHub→Vercel integration auto-builds a
+# preview. This workflow waits for that preview to reach READY state, then
+# attaches `<slug>.<lab_domain>` as an alias via the Vercel REST API.
+#
+# We use the REST API directly rather than a wrapper action so we're insulated
+# from third-party-action drift (the previous amondnet/vercel-action@v25 ships
+# a Vercel CLI version that became incompatible with the public API).
+
+on:
+  push:
+    branches:
+      - 'experiment/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  alias:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read project-meta.json
+        id: meta
+        run: |
+          LAB_DOMAIN=$(jq -r '.lab_domain' .claude-plugin/project-meta.json)
+          echo "lab_domain=$LAB_DOMAIN" >> $GITHUB_OUTPUT
+
+      # Project + org IDs come from GitHub repo secrets (NOT .vercel/project.json,
+      # which Vercel CLI gitignores by design). perea-ai:start-project and
+      # perea-ai:retrofit set these as part of the backbone install.
+      - name: Read Vercel project/org IDs from secrets
+        id: vercel
+        env:
+          PID: ${{ secrets.VERCEL_PROJECT_ID }}
+          ORG: ${{ secrets.VERCEL_ORG_ID }}
+        run: |
+          if [ -z "$PID" ] || [ -z "$ORG" ]; then
+            echo "::error::Secrets VERCEL_PROJECT_ID and VERCEL_ORG_ID are required. Set via:  gh secret set VERCEL_PROJECT_ID --repo \$GITHUB_REPOSITORY --body prj_xxx ; gh secret set VERCEL_ORG_ID --repo \$GITHUB_REPOSITORY --body team_xxx"
+            exit 1
+          fi
+          echo "project_id=$PID" >> $GITHUB_OUTPUT
+          echo "org_id=$ORG" >> $GITHUB_OUTPUT
+
+      - name: Derive slug, enforce ≤50 chars
+        id: slug
+        run: |
+          RAW="${GITHUB_REF_NAME#experiment/}"
+          SLUG=$(echo "$RAW" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
+          if [ -z "$SLUG" ]; then
+            echo "::error::slug is empty after normalization (raw: '$RAW')"
+            exit 1
+          fi
+          if [ ${#SLUG} -gt 50 ]; then
+            echo "::error::slug '$SLUG' is ${#SLUG} chars (>50, DNS label cap headroom). Rename the branch."
+            exit 1
+          fi
+          echo "slug=$SLUG" >> $GITHUB_OUTPUT
+
+      - name: Wait for Vercel preview, then attach lab alias
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          TEAM_ID: ${{ steps.vercel.outputs.org_id }}
+          PROJECT_ID: ${{ steps.vercel.outputs.project_id }}
+          SLUG: ${{ steps.slug.outputs.slug }}
+          LAB_DOMAIN: ${{ steps.meta.outputs.lab_domain }}
+        run: |
+          set -e
+          ALIAS="${SLUG}.${LAB_DOMAIN}"
+
+          # Poll up to 5 minutes for the deployment matching this SHA to become READY.
+          DEPLOYMENT_ID=""
+          DEPLOYMENT_URL=""
+          for i in $(seq 1 60); do
+            RESP=$(curl -sS -H "Authorization: Bearer $VERCEL_TOKEN" \
+              "https://api.vercel.com/v6/deployments?teamId=$TEAM_ID&projectId=$PROJECT_ID&limit=20")
+            # Find the most recent deployment whose meta.githubCommitSha matches ours
+            ENTRY=$(echo "$RESP" | jq -r --arg sha "$GITHUB_SHA" '
+              .deployments[]
+              | select(.meta.githubCommitSha == $sha)
+              | "\(.uid) \(.url) \(.readyState)"
+            ' | head -1)
+            if [ -n "$ENTRY" ]; then
+              STATE=$(echo "$ENTRY" | awk '{print $3}')
+              if [ "$STATE" = "READY" ]; then
+                DEPLOYMENT_ID=$(echo "$ENTRY" | awk '{print $1}')
+                DEPLOYMENT_URL=$(echo "$ENTRY" | awk '{print $2}')
+                break
+              fi
+              echo "Deployment found, state=$STATE — waiting ($i/60)..."
+            else
+              echo "No deployment matching SHA $GITHUB_SHA yet ($i/60)..."
+            fi
+            sleep 5
+          done
+
+          if [ -z "$DEPLOYMENT_ID" ]; then
+            echo "::error::Timed out waiting for a READY deployment matching $GITHUB_SHA"
+            exit 1
+          fi
+          echo "Deployment READY: id=$DEPLOYMENT_ID  url=$DEPLOYMENT_URL"
+
+          # Attach the alias
+          ALIAS_RESP=$(curl -sS -X POST \
+            "https://api.vercel.com/v2/deployments/$DEPLOYMENT_ID/aliases?teamId=$TEAM_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" \
+            -d "{\"alias\":\"$ALIAS\"}")
+          ERR=$(echo "$ALIAS_RESP" | jq -r '.error.code // empty')
+          if [ -n "$ERR" ]; then
+            echo "::error::Alias attach failed: $ERR"
+            echo "$ALIAS_RESP" | jq .
+            exit 1
+          fi
+          echo "Alias attached: https://$ALIAS"
+          echo "alias_url=https://$ALIAS" >> $GITHUB_OUTPUT
+
+      # Posts a fresh comment on every push. Long-lived branches accumulate
+      # duplicates — acceptable for now; switch to "edit last bot comment" if
+      # the duplication becomes noisy in practice.
+      - name: Comment on PR (if exists)
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ALIAS_URL: ${{ steps.deploy.outputs.alias_url }}
+        run: |
+          # best-effort: gh failures here are non-fatal
+          PR=$(gh pr list --head "$GITHUB_REF_NAME" --json number --jq '.[0].number' || echo "")
+          if [ -n "$PR" ]; then
+            gh pr comment "$PR" --body "🔬 Lab preview: $ALIAS_URL"
+          fi

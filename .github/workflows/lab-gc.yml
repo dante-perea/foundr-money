@@ -1,0 +1,89 @@
+name: lab-gc
+
+# Alias-only GC. Deployment GC is handled by Vercel's Deployment Retention Policy
+# (configured to 14 days by perea-ai:start-project; see plugins-meta backbone_installed_at).
+# This workflow only deletes lab.<domain> aliases whose underlying deployment
+# is gone or whose pointed-at deployment exited READY state >48h ago.
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read project-meta.json
+        id: meta
+        run: |
+          LAB_DOMAIN=$(jq -r '.lab_domain' .claude-plugin/project-meta.json)
+          echo "lab_domain=$LAB_DOMAIN" >> $GITHUB_OUTPUT
+
+      - name: Read .vercel/project.json
+        id: vercel
+        run: |
+          ORG=$(jq -r '.orgId' .vercel/project.json)
+          echo "team_id=$ORG" >> $GITHUB_OUTPUT
+
+      - name: GC dangling / stale lab aliases
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          LAB_DOMAIN: ${{ steps.meta.outputs.lab_domain }}
+          TEAM_ID: ${{ steps.vercel.outputs.team_id }}
+        run: |
+          set -e
+          NOW=$(date -u +%s)
+          THRESHOLD=$((48 * 3600))
+
+          # Lists the first 200 aliases. If a project ever accumulates more
+          # lab.<domain> aliases than that, add cursor pagination using the
+          # `until`/`from` query params on /v4/aliases.
+          ALIASES=$(curl -sS -H "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v4/aliases?teamId=$TEAM_ID&limit=200" | \
+            jq -r --arg dom "$LAB_DOMAIN" '
+              .aliases[]
+              | select(.alias | endswith($dom))
+              | "\(.uid) \(.alias) \(.deploymentId // "null")"
+            ')
+
+          DELETED=0
+          KEPT=0
+          while IFS=' ' read -r UID ALIAS DEP_ID; do
+            if [ -z "$UID" ]; then continue; fi
+            # Dangling: no deployment ID on the alias record
+            if [ "$DEP_ID" = "null" ] || [ -z "$DEP_ID" ]; then
+              echo "GC dangling alias: $ALIAS"
+              curl -sS -X DELETE -H "Authorization: Bearer $VERCEL_TOKEN" \
+                "https://api.vercel.com/v2/aliases/$UID?teamId=$TEAM_ID" > /dev/null
+              DELETED=$((DELETED + 1))
+              continue
+            fi
+            # Deployment exists; check age
+            DEP=$(curl -sS -H "Authorization: Bearer $VERCEL_TOKEN" \
+              "https://api.vercel.com/v13/deployments/$DEP_ID?teamId=$TEAM_ID")
+            STATE=$(echo "$DEP" | jq -r '.readyState // "UNKNOWN"')
+            CREATED=$(echo "$DEP" | jq -r '.createdAt // 0')
+            CREATED_S=$((CREATED / 1000))
+            AGE=$((NOW - CREATED_S))
+            # If deployment is gone (Vercel retention reaped it), the GET 404s and our jq gives empty
+            if [ -z "$CREATED" ] || [ "$CREATED" = "0" ]; then
+              echo "GC orphan alias (deployment 404): $ALIAS"
+              curl -sS -X DELETE -H "Authorization: Bearer $VERCEL_TOKEN" \
+                "https://api.vercel.com/v2/aliases/$UID?teamId=$TEAM_ID" > /dev/null
+              DELETED=$((DELETED + 1))
+            elif [ "$AGE" -gt "$THRESHOLD" ]; then
+              echo "GC stale alias: $ALIAS (deployment $STATE, age ${AGE}s)"
+              curl -sS -X DELETE -H "Authorization: Bearer $VERCEL_TOKEN" \
+                "https://api.vercel.com/v2/aliases/$UID?teamId=$TEAM_ID" > /dev/null
+              DELETED=$((DELETED + 1))
+            else
+              KEPT=$((KEPT + 1))
+            fi
+          done <<< "$ALIASES"
+          echo "GC complete: $DELETED deleted, $KEPT kept" >> $GITHUB_STEP_SUMMARY

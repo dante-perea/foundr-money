@@ -1,0 +1,33 @@
+{
+  "$schema": "https://perea.ai/schemas/project-meta/v1.json",
+  "schema_version": "1.0.0",
+  "generator": {
+    "name": "perea-ai",
+    "version": "1.1.0"
+  },
+  "spawned_by": "perea-ai",
+
+  "product_name": "foundr-money",
+  "production_domain": "foundr.money",
+  "lab_domain": "lab.foundr.money",
+  "github_repo": "dante-perea/foundr-money",
+
+  "stack": {
+    "framework": "nextjs",
+    "storage": "none",
+    "database": {
+      "provider": "none",
+      "orm": "none"
+    },
+    "auth": "none",
+    "billing": "none",
+    "observability": "vercel-logs"
+  },
+
+  "_local": {
+    "checkout_root": "/home/dante/projects/foundr-money"
+  },
+
+  "created_at": "2026-05-30T20:34:01Z",
+  "backbone_installed_at": "2026-05-30T20:34:01Z"
+}
