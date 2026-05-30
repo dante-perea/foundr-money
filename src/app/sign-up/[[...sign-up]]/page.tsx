@@ -1,9 +1,15 @@
-import { SignUp } from '@clerk/nextjs'
+import { Suspense } from 'react'
+import { connection } from 'next/server'
+import { SignUpForm } from './sign-up-form'
 
-export default function SignUpPage() {
+// See sign-in page for the cacheComponents + Clerk rationale.
+export default async function SignUpPage() {
+  await connection()
   return (
-    <main className="min-h-screen flex items-center justify-center">
-      <SignUp />
+    <main className="flex min-h-screen items-center justify-center bg-slate-900 p-6">
+      <Suspense fallback={<div className="min-h-screen" />}>
+        <SignUpForm />
+      </Suspense>
     </main>
   )
 }
