@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { UserButton } from '@clerk/nextjs'
+import { ClerkProvider, UserButton } from '@clerk/nextjs'
 import { getOwnerId } from '@/lib/money/owner'
 import { ensureSeeded } from '@/lib/money/seed'
 import { Wordmark } from '@/components/brand/Wordmark'
@@ -12,6 +12,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   await ensureSeeded(ownerId)
 
   return (
+    <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up" afterSignOutUrl="/">
     <div className="min-h-screen bg-bg-alt">
       <header className="border-b border-line bg-surface">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
@@ -34,5 +35,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
       </header>
       <main className="mx-auto max-w-6xl px-6 py-10">{children}</main>
     </div>
+    </ClerkProvider>
   )
 }
