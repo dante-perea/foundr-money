@@ -1,25 +1,30 @@
-import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/nextjs'
+import { MarketingNav } from '@/components/marketing/MarketingNav'
+import { Hero } from '@/components/marketing/Hero'
+import { WhatItIs } from '@/components/marketing/WhatItIs'
+import { HowItWorks } from '@/components/marketing/HowItWorks'
+import { WhatMakesItDifferent } from '@/components/marketing/WhatMakesItDifferent'
+import { IncumbentGap } from '@/components/marketing/IncumbentGap'
+import { WhyItExists } from '@/components/marketing/WhyItExists'
+import { PricingTeaser } from '@/components/marketing/PricingTeaser'
+import { MarketingFooter } from '@/components/marketing/MarketingFooter'
 
+// Public marketing landing — fully static / prerenderable under cacheComponents.
+// No Clerk session hooks anywhere in this tree. Section bands alternate
+// white / slate-50 down the page.
 export default function Home() {
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center p-8">
-      <h1 className="text-3xl font-semibold mb-2">foundr-money</h1>
-      <p className="text-sm text-slate-500 mb-8">project-first agent-native budgeting for the multi-project micro-founder</p>
-
-      <SignedOut>
-        <SignInButton mode="modal">
-          <button className="px-4 py-2 rounded bg-slate-900 text-white text-sm hover:bg-slate-800">
-            Sign in
-          </button>
-        </SignInButton>
-      </SignedOut>
-
-      <SignedIn>
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-slate-700">Signed in.</span>
-          <UserButton afterSignOutUrl="/" />
-        </div>
-      </SignedIn>
-    </main>
+    <div className="min-h-screen bg-surface text-ink">
+      <MarketingNav />
+      <main>
+        <Hero />
+        <WhatItIs />
+        <HowItWorks />
+        <WhatMakesItDifferent />
+        <IncumbentGap />
+        <WhyItExists />
+        <PricingTeaser />
+      </main>
+      <MarketingFooter />
+    </div>
   )
 }
