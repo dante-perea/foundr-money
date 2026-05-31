@@ -7,6 +7,9 @@ import { PeriodSelector } from '@/components/dashboard/PeriodSelector'
 import { BurnByProject } from '@/components/dashboard/BurnByProject'
 import { PortfolioSplit } from '@/components/dashboard/PortfolioSplit'
 import { EmptyState } from '@/components/dashboard/EmptyState'
+import { DemoBanner } from '@/components/dashboard/DemoBanner'
+import { getOnboarding } from '@/lib/money/onboarding'
+import { hasDemoData } from '@/lib/money/demo'
 import { formatCents } from '@/lib/money/money'
 
 const PERIODS: Period[] = ['last30', 'mtd', 'ytd', 'all']
@@ -43,6 +46,11 @@ export default async function DashboardOverview({
   ])
   const totals = await portfolioTotals(rows, untagged.length)
 
+  // Honest "exploring with sample data" label: only when the founder chose the
+  // demo path AND seeded rows are still present (so it vanishes after clearing).
+  const onboarding = await getOnboarding(owner)
+  const showDemoBanner = Boolean(onboarding?.used_sample_data) && (await hasDemoData(owner))
+
   const netPositive = totals.net_cents >= 0
 
   // Freshly-onboarded / no spend yet: nothing to chart this period (projects
@@ -54,6 +62,7 @@ export default async function DashboardOverview({
   if (isEmpty) {
     return (
       <div className="flex flex-col gap-8">
+        {showDemoBanner && <DemoBanner />}
         <div>
           <p className="font-mono text-xs uppercase tracking-[0.18em] text-subtle">Portfolio</p>
           <h1 className="mt-2 font-display text-4xl font-semibold tracking-tight text-ink sm:text-5xl">
@@ -79,6 +88,8 @@ export default async function DashboardOverview({
 
   return (
     <div className="flex flex-col gap-8">
+      {showDemoBanner && <DemoBanner />}
+
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>

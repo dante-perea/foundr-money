@@ -8,6 +8,7 @@ import { connection } from 'next/server'
 import { CountryCode } from 'plaid'
 import { requireOwnerId } from '@/lib/money/owner'
 import { db } from '@/lib/money/db'
+import { encrypt } from '@/lib/money/crypto'
 import { plaidClient, plaidConfigured, syncPlaidItem } from '@/lib/money/ingest/plaid'
 
 export async function POST(req: Request): Promise<Response> {
@@ -66,14 +67,16 @@ export async function POST(req: Request): Promise<Response> {
       // best-effort enrichment only
     }
 
-    // Persist plaid_items (upsert on the item_id PK).
+    // Persist plaid_items (upsert on the item_id PK). The access_token is
+    // encrypted at rest (AES-256-GCM) — real tokens are encrypted going
+    // forward; decrypted on read in syncPlaidItem.
     await db()
       .from('plaid_items')
       .upsert(
         {
           item_id: itemId,
           owner_id: owner,
-          access_token: accessToken,
+          access_token: encrypt(accessToken),
           institution_name: institutionName,
           status: 'active',
         },

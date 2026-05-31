@@ -6,6 +6,7 @@ import {
   type Transaction as PlaidTransaction,
 } from 'plaid'
 import { db } from '../db'
+import { decrypt } from '../crypto'
 import { ensurePersonalProject } from '../projects'
 import { insertCanonicalTransaction } from '../transactions'
 import type { RawTransaction } from '../types'
@@ -167,6 +168,9 @@ export async function syncPlaidItem(ownerId: string, itemId: string): Promise<Sy
     return result
   }
   const item = itemData as PlaidItemRow
+  // Stored access_token is encrypted at rest — decrypt before use. (Degrades
+  // safely for plaintext-marked / legacy rows; see lib/money/crypto.)
+  const accessToken = decrypt(item.access_token)
 
   const personal = await ensurePersonalProject(ownerId)
   const acctCache = new Map<string, string | null>()
@@ -177,7 +181,7 @@ export async function syncPlaidItem(ownerId: string, itemId: string): Promise<Sy
   try {
     while (hasMore) {
       const resp = await client.transactionsSync({
-        access_token: item.access_token,
+        access_token: accessToken,
         cursor,
         count: 250,
       })

@@ -206,4 +206,26 @@ export async function ensureSeeded(ownerId: string): Promise<void> {
         line_items: [{ description: 'Pro seat', amount_cents: 2000 }],
       },
     ])
+
+  // 9. Flag every sample row is_demo=true so it's labeled + cleanly removable.
+  //    The Personal/Unallocated project is a system primitive every founder keeps
+  //    even after clearing the demo, so it is deliberately NOT flagged here — only
+  //    the five seeded projects are. All other tables touched above are entirely
+  //    demo-authored, so a blanket owner-scoped update is correct (and idempotent).
+  await db()
+    .from('projects')
+    .update({ is_demo: true })
+    .eq('owner_id', ownerId)
+    .eq('is_personal', false)
+  await Promise.all(
+    [
+      'financial_accounts',
+      'transactions',
+      'recurring_streams',
+      'provider_invoices',
+      'stripe_subscriptions',
+      'external_project_map',
+      'merchant_rules',
+    ].map((table) => db().from(table).update({ is_demo: true }).eq('owner_id', ownerId)),
+  )
 }

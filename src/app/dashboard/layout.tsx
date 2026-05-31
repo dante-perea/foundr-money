@@ -44,6 +44,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
               <Link href="/dashboard/connect" className="text-muted transition hover:text-ink">
                 Connect
               </Link>
+              <Link href="/dashboard/settings" className="text-muted transition hover:text-ink">
+                Settings
+              </Link>
             </nav>
           </div>
           <UserButton />
