@@ -5,7 +5,7 @@ import { isOnboarded } from '@/lib/money/onboarding'
 import {
   CLERK_IS_SATELLITE,
   CLERK_SATELLITE_DOMAIN,
-  SIGN_IN_URL,
+  satelliteSignInUrl,
 } from '@/lib/clerk-satellite'
 
 export default async function OnboardingLayout({ children }: { children: React.ReactNode }) {
@@ -13,7 +13,7 @@ export default async function OnboardingLayout({ children }: { children: React.R
   if (!ownerId) {
     redirect(
       CLERK_IS_SATELLITE
-        ? `${SIGN_IN_URL}?redirect_url=${encodeURIComponent(`https://${CLERK_SATELLITE_DOMAIN}/onboarding`)}`
+        ? satelliteSignInUrl(`https://${CLERK_SATELLITE_DOMAIN}/onboarding`)
         : '/sign-in',
     )
   }

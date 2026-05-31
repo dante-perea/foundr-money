@@ -8,7 +8,7 @@ import { Wordmark } from '@/components/brand/Wordmark'
 import {
   CLERK_IS_SATELLITE,
   CLERK_SATELLITE_DOMAIN,
-  SIGN_IN_URL,
+  satelliteSignInUrl,
 } from '@/lib/clerk-satellite'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -17,7 +17,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     // Satellite: bounce to the primary (foundr.company) sign-in and return here.
     redirect(
       CLERK_IS_SATELLITE
-        ? `${SIGN_IN_URL}?redirect_url=${encodeURIComponent(`https://${CLERK_SATELLITE_DOMAIN}/dashboard`)}`
+        ? satelliteSignInUrl(`https://${CLERK_SATELLITE_DOMAIN}/dashboard`)
         : '/sign-in',
     )
   }

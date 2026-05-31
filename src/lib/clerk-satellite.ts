@@ -19,6 +19,20 @@ export const CLERK_SATELLITE_DOMAIN = process.env.NEXT_PUBLIC_CLERK_SATELLITE_DO
 export const SIGN_IN_URL = CLERK_IS_SATELLITE ? `${CLERK_PRIMARY_URL}/sign-in` : '/sign-in'
 export const SIGN_UP_URL = CLERK_IS_SATELLITE ? `${CLERK_PRIMARY_URL}/sign-up` : '/sign-up'
 
+export function satelliteSignInUrl(returnUrl: string): string {
+  if (!CLERK_IS_SATELLITE) return '/sign-in'
+  const url = new URL(SIGN_IN_URL)
+  url.searchParams.set('sign_in_force_redirect_url', returnUrl)
+  return url.toString()
+}
+
+export function satelliteSignUpUrl(returnUrl: string): string {
+  if (!CLERK_IS_SATELLITE) return '/sign-up'
+  const url = new URL(SIGN_UP_URL)
+  url.searchParams.set('sign_up_force_redirect_url', returnUrl)
+  return url.toString()
+}
+
 // The <ClerkProvider> props formerly exported here (`clerkProviderProps`) are
 // gone: the provider is now ROOT-MOUNTED via the 'use client'
 // SatelliteClerkProvider (src/components/auth/satellite-clerk-provider.tsx),

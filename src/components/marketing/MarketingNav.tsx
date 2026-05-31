@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { AuthRedirectLink } from '@/components/auth/AuthRedirectLink'
 import { Wordmark } from '@/components/brand/Wordmark'
 
 // Public marketing nav — Wordmark + Pricing / Sign in links + "Get started".
@@ -16,18 +17,18 @@ export function MarketingNav() {
           >
             Pricing
           </Link>
-          <Link
-            href="/sign-in"
+          <AuthRedirectLink
+            mode="sign-in"
             className="text-sm font-medium text-muted transition hover:text-ink"
           >
             Sign in
-          </Link>
-          <Link
-            href="/sign-up"
+          </AuthRedirectLink>
+          <AuthRedirectLink
+            mode="sign-up"
             className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-accent-hover"
           >
             Get started
-          </Link>
+          </AuthRedirectLink>
         </div>
       </nav>
     </header>
