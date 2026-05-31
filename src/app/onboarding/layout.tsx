@@ -1,10 +1,8 @@
 import { redirect } from 'next/navigation'
-import { ClerkProvider } from '@clerk/nextjs'
 import { getOwnerId } from '@/lib/money/owner'
 import { ensurePersonalProject } from '@/lib/money/projects'
 import { isOnboarded } from '@/lib/money/onboarding'
 import {
-  clerkProviderProps,
   CLERK_IS_SATELLITE,
   CLERK_SATELLITE_DOMAIN,
   SIGN_IN_URL,
@@ -24,8 +22,7 @@ export default async function OnboardingLayout({ children }: { children: React.R
   if (await isOnboarded(ownerId)) redirect('/dashboard')
 
   return (
-    <ClerkProvider {...clerkProviderProps} afterSignOutUrl="/">
-      <div className="min-h-screen bg-bg-alt">{children}</div>
-    </ClerkProvider>
+    // ClerkProvider is root-mounted (src/app/layout.tsx) — no per-route wrapper.
+    <div className="min-h-screen bg-bg-alt">{children}</div>
   )
 }

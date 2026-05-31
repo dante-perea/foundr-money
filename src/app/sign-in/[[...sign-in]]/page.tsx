@@ -1,25 +1,26 @@
 import { Suspense } from 'react'
 import { connection } from 'next/server'
 import { redirect } from 'next/navigation'
-import { ClerkProvider } from '@clerk/nextjs'
 import { SignInForm } from './sign-in-form'
-import { CLERK_IS_SATELLITE, SIGN_IN_URL, clerkProviderProps } from '@/lib/clerk-satellite'
+import { CLERK_IS_SATELLITE, SIGN_IN_URL } from '@/lib/clerk-satellite'
 
-// Force this route dynamic — Clerk's client form can't render under the
-// Suspense fallback that wraps ClerkProvider during prerender. `connection()`
-// opts out of build-time prerender; ClerkProvider is scoped to this route (not
-// the static root) and the form lives behind a 'use client' boundary.
+// ClerkProvider is root-mounted (src/app/layout.tsx) — this page no longer
+// wraps its own. `connection()` opts out of build-time prerender so the Clerk
+// client form isn't evaluated under the root Suspense fallback during
+// prerender; the form lives behind a 'use client' boundary.
+//
+// In SATELLITE mode this route is dead-codeish — we redirect to the primary's
+// sign-in before rendering. The local <SignIn> form below only renders in dev
+// (satellite OFF, dev-instance keys).
 export default async function SignInPage() {
   // Satellites don't host sign-in — bounce to the primary (foundr.company).
   if (CLERK_IS_SATELLITE) redirect(SIGN_IN_URL)
   await connection()
   return (
-    <ClerkProvider {...clerkProviderProps} afterSignInUrl="/dashboard">
-      <main className="flex min-h-screen items-center justify-center bg-bg-alt p-6">
-        <Suspense fallback={<div className="min-h-screen" />}>
-          <SignInForm />
-        </Suspense>
-      </main>
-    </ClerkProvider>
+    <main className="flex min-h-screen items-center justify-center bg-bg-alt p-6">
+      <Suspense fallback={<div className="min-h-screen" />}>
+        <SignInForm />
+      </Suspense>
+    </main>
   )
 }

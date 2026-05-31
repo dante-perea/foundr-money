@@ -19,18 +19,13 @@ export const CLERK_SATELLITE_DOMAIN = process.env.NEXT_PUBLIC_CLERK_SATELLITE_DO
 export const SIGN_IN_URL = CLERK_IS_SATELLITE ? `${CLERK_PRIMARY_URL}/sign-in` : '/sign-in'
 export const SIGN_UP_URL = CLERK_IS_SATELLITE ? `${CLERK_PRIMARY_URL}/sign-up` : '/sign-up'
 
-/** Props spread onto <ClerkProvider>. Satellite props only when enabled. */
-export const clerkProviderProps = CLERK_IS_SATELLITE
-  ? {
-      isSatellite: true as const,
-      domain: CLERK_SATELLITE_DOMAIN,
-      signInUrl: SIGN_IN_URL,
-      signUpUrl: SIGN_UP_URL,
-    }
-  : {
-      signInUrl: '/sign-in',
-      signUpUrl: '/sign-up',
-    }
+// The <ClerkProvider> props formerly exported here (`clerkProviderProps`) are
+// gone: the provider is now ROOT-MOUNTED via the 'use client'
+// SatelliteClerkProvider (src/components/auth/satellite-clerk-provider.tsx),
+// which derives `domain` from the live window.location.host (string form — the
+// satellite-correct pattern) and adds allowedRedirectOrigins. Root-mounting is
+// what lets clerk-js boot on every page so an already-signed-in-on-primary
+// visitor syncs on an organic visit. Do NOT re-add a per-route provider.
 
 /** Options passed to clerkMiddleware() in src/proxy.ts. */
 export const clerkMiddlewareOptions = CLERK_IS_SATELLITE
