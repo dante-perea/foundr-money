@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { AuthRedirectLink } from '@/components/auth/AuthRedirectLink'
 import { Wordmark } from '@/components/brand/Wordmark'
 
 // Marketing footer — wordmark, a few links, and the canonical Perea byline.
@@ -11,12 +12,12 @@ export function MarketingFooter() {
           <Link href="/pricing" className="transition hover:text-ink">
             Pricing
           </Link>
-          <Link href="/sign-in" className="transition hover:text-ink">
+          <AuthRedirectLink mode="sign-in" className="transition hover:text-ink">
             Sign in
-          </Link>
-          <Link href="/sign-up" className="transition hover:text-ink">
+          </AuthRedirectLink>
+          <AuthRedirectLink mode="sign-up" className="transition hover:text-ink">
             Get started
-          </Link>
+          </AuthRedirectLink>
           <Link href="/privacy" className="transition hover:text-ink">
             Privacy
           </Link>

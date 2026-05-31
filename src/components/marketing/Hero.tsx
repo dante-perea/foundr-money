@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { AuthRedirectLink } from '@/components/auth/AuthRedirectLink'
 import { PRODUCT } from '@/lib/money/constants'
 
 // Hero — eyebrow, the product tagline as H1, the one-liner as subhead, and the
@@ -24,18 +25,18 @@ export function Hero() {
             {PRODUCT.oneLiner}
           </p>
           <div className="mt-9 flex items-center justify-center gap-3">
-            <Link
-              href="/sign-up"
+            <AuthRedirectLink
+              mode="sign-up"
               className="rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-white transition hover:bg-accent-hover"
             >
               Get started
-            </Link>
-            <Link
-              href="/sign-in"
+            </AuthRedirectLink>
+            <AuthRedirectLink
+              mode="sign-in"
               className="rounded-md border border-line bg-surface px-5 py-2.5 text-sm font-medium text-ink transition hover:border-line-strong"
             >
               Sign in
-            </Link>
+            </AuthRedirectLink>
           </div>
           <p className="mt-6 font-mono text-xs text-subtle">
             no entity required · no card to apply for · live in three steps
