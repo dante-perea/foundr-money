@@ -1,12 +1,11 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ClerkProvider, UserButton } from '@clerk/nextjs'
+import { UserButton } from '@clerk/nextjs'
 import { getOwnerId } from '@/lib/money/owner'
 import { ensurePersonalProject } from '@/lib/money/projects'
 import { isOnboarded } from '@/lib/money/onboarding'
 import { Wordmark } from '@/components/brand/Wordmark'
 import {
-  clerkProviderProps,
   CLERK_IS_SATELLITE,
   CLERK_SATELLITE_DOMAIN,
   SIGN_IN_URL,
@@ -28,7 +27,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   if (!(await isOnboarded(ownerId))) redirect('/onboarding')
 
   return (
-    <ClerkProvider {...clerkProviderProps} afterSignOutUrl="/">
+    // ClerkProvider is root-mounted (src/app/layout.tsx) — no per-route wrapper.
     <div className="min-h-screen bg-bg-alt">
       <header className="border-b border-line bg-surface">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
@@ -49,11 +48,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
               </Link>
             </nav>
           </div>
-          <UserButton />
+          <UserButton afterSignOutUrl="/" />
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-10">{children}</main>
     </div>
-    </ClerkProvider>
   )
 }
