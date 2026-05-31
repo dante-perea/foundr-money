@@ -60,16 +60,55 @@ export async function portfolioPnl(ownerId: string, period: Period = 'last30'): 
     })
   }
 
+  // ── Double-count guard: reconciled provider invoices ──────────────────────
+  // A provider's usage (Vercel/OpenAI/…) is ingested as GRANULAR per-project
+  // transactions (on a kind='provider_invoice' account) so we get per-project
+  // burn. The bank/card statement ALSO carries the lump-sum charge that PAID
+  // that bill (on a kind='card'/'bank' account). Both are real transactions,
+  // both allocate to a project — summing both DOUBLES the spend for one
+  // economic event. reconcile.ts matches the invoice to its paying card charge
+  // and stamps provider_invoices.reconciled_txn_id with that PAYING txn's id
+  // (it explicitly excludes provider_invoice-account rows as match candidates).
+  //
+  // Dedupe rule: keep the granular usage line items (they carry the per-project
+  // signal) and EXCLUDE the reconciled paying charge. So we collect every
+  // reconciled_txn_id and skip its allocations below. The lump-sum charge is
+  // still visible as a transaction in the ledger — it is only omitted from the
+  // P&L sum to avoid counting the same dollars twice.
+  //
+  // NOTE: provider_invoices itself is NEVER summed here — it is a record, not a
+  // ledger. Its line items are already represented as the per-project usage
+  // transactions. The only thing it contributes to the rollup is this exclusion
+  // set of paying charges.
+  const { data: reconciled, error: rErr } = await db()
+    .from('provider_invoices')
+    .select('reconciled_txn_id')
+    .eq('owner_id', ownerId)
+    .not('reconciled_txn_id', 'is', null)
+  if (rErr) throw rErr
+  const reconciledTxnIds = new Set(
+    ((reconciled ?? []) as { reconciled_txn_id: string | null }[])
+      .map((r) => r.reconciled_txn_id)
+      .filter((id): id is string => Boolean(id)),
+  )
+
   // Allocations joined to transactions for the date filter.
   let q = db()
     .from('transaction_allocations')
-    .select('amount_cents, project_id, transactions!inner(posted_at)')
+    .select('amount_cents, project_id, transaction_id, transactions!inner(posted_at)')
     .eq('owner_id', ownerId)
   if (start) q = q.gte('transactions.posted_at', start)
   const { data: allocs, error: aErr } = await q
   if (aErr) throw aErr
 
-  for (const a of (allocs ?? []) as { amount_cents: number; project_id: string }[]) {
+  for (const a of (allocs ?? []) as {
+    amount_cents: number
+    project_id: string
+    transaction_id: string
+  }[]) {
+    // Skip the paying card/bank charge that a provider invoice reconciles to —
+    // its dollars are already counted via the granular usage line items.
+    if (reconciledTxnIds.has(a.transaction_id)) continue
     const r = rollup.get(a.project_id)
     if (!r) continue
     if (a.amount_cents >= 0) r.expense_cents += a.amount_cents

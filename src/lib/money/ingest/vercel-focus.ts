@@ -1,30 +1,49 @@
 import 'server-only'
 import { db } from '../db'
-import { ensurePersonalProject } from '../projects'
+import { createProject, getProjectBySlug } from '../projects'
 import { insertCanonicalTransaction } from '../transactions'
-import type { RawTransaction } from '../types'
+import type { Project, RawTransaction } from '../types'
 
 // ── Vercel FOCUS billing pull ──────────────────────────────────────────────
 // Vercel exposes usage/cost in the FOCUS 1.0 schema (FinOps Open Cost &
-// Usage Spec). The export is JSONL — one JSON object per cost record per line.
-// We only need a team token (`VERCEL_TOKEN`, optionally `VERCEL_TEAM_ID`); no
-// per-project credential dance — Vercel tags every record with the project.
+// Usage Spec) via GET /v1/billing/charges. The export is JSONL — one FOCUS
+// record per line. We only need a team token (`VERCEL_TOKEN`) + the team id
+// (`VERCEL_TEAM_ID`); no per-project credential dance — Vercel tags most
+// records with the project (`Tags.ProjectId` / `Tags.ProjectName`).
+//
+// The window is REQUIRED: `from` and `to` are ISO `YYYY-MM-DD`. An empty or
+// future window returns 404 — we treat that as a clean empty result.
 //
 // FOCUS columns we read:
-//   • BilledCost   — the billed amount for the period (decimal, in BillingCurrency)
+//   • BilledCost     — the BILLED amount (decimal). Under the Pro plan most
+//                      rows BilledCost===0 (the usage is inside the plan) — so
+//                      BilledCost alone is NOT a usable per-project signal.
+//   • EffectiveCost  — the amortized/true consumption cost. THIS is the
+//                      per-project burn signal we key the canonical amount on.
 //   • BillingCurrency — ISO currency (e.g. "USD")
-//   • ServiceName  — the Vercel product line (e.g. "Edge Functions", "Bandwidth")
-//   • ChargePeriodStart / ChargePeriodEnd — ISO timestamps
+//   • ServiceName     — Vercel product line (e.g. "Edge Functions", "Bandwidth")
+//   • ServiceCategory / ChargeCategory — FOCUS taxonomy (kept in the description
+//                       + folded into the stable external_id so a project's
+//                       Usage vs. Purchase vs. Tax rows don't collide).
+//   • ChargePeriodStart / ChargePeriodEnd — ISO timestamps for the line's window
 //   • Tags.ProjectId / Tags.ProjectName — Vercel's NATIVE project identity, the
 //     thing that makes per-project burn possible without manual tagging. We map
 //     Tags.ProjectId → a foundr project via external_project_map (provider
-//     'vercel'); unmapped rows land in Personal/Unallocated.
+//     'vercel'). Rows with empty Tags ({}) are team-level (the $4.50 Pro fee,
+//     Speed Insights, Blob, …) → routed to an 'Unallocated / Platform' project.
 //
 // Guarded on a missing token — fetchAndIngestVercelFocus returns a clean result
 // object, never throws, when VERCEL_TOKEN is absent.
 
 const FOCUS_ENDPOINT =
-  process.env.VERCEL_FOCUS_URL || 'https://api.vercel.com/v1/installations/billing/focus'
+  process.env.VERCEL_FOCUS_URL || 'https://api.vercel.com/v1/billing/charges'
+
+const UNALLOCATED_SLUG = 'unallocated'
+const UNALLOCATED_NAME = 'Unallocated / Platform'
+
+// Schedule-C-mapped system category for hosting/infra spend. 'Infrastructure'
+// is not a seeded category; 'Software & SaaS' (L27a) is the closest fit.
+const VERCEL_CATEGORY_LABEL = 'Software & SaaS'
 
 export function vercelConfigured(): boolean {
   return Boolean(process.env.VERCEL_TOKEN)
@@ -35,9 +54,13 @@ interface FocusRow {
   EffectiveCost?: number | string | null
   BillingCurrency?: string | null
   ServiceName?: string | null
+  ServiceCategory?: string | null
+  ChargeCategory?: string | null
   ChargeDescription?: string | null
   ChargePeriodStart?: string | null
   ChargePeriodEnd?: string | null
+  ConsumedQuantity?: number | string | null
+  ConsumedUnit?: string | null
   Tags?: Record<string, string> | null
   // Vercel sometimes flattens tags as `Tags.ProjectId` string keys:
   'Tags.ProjectId'?: string | null
@@ -50,33 +73,77 @@ function tagOf(row: FocusRow, key: 'ProjectId' | 'ProjectName'): string | null {
   return row.Tags?.[key] ?? null
 }
 
+function num(v: number | string | null | undefined): number {
+  const n = Number(v ?? 0)
+  return Number.isFinite(n) ? n : 0
+}
+
+/** Today, as a UTC YYYY-MM-DD string. */
+function todayUtc(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+/** First day of the current UTC month, as YYYY-MM-DD. */
+function monthStartUtc(): string {
+  const now = new Date()
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10)
+}
+
+/**
+ * Map ONE FOCUS row into a canonical RawTransaction. Returns null only when the
+ * row carries NO consumption signal at all (both BilledCost and EffectiveCost
+ * are 0) — those are noise. Otherwise:
+ *   • amount_cents     ← EffectiveCost (the true per-project consumption signal)
+ *   • raw_amount_cents ← BilledCost    (what actually hit the invoice; $0 under Pro)
+ * Both stay expense-positive (FOCUS costs are positive decimals for spend).
+ */
 function focusRowToRaw(
   row: FocusRow,
   accountRef: string,
-  index: number,
+  /** Category LABEL (e.g. 'Software & SaaS') for the classifier hint — NOT the id. */
+  categoryHint: string | null,
 ): RawTransaction | null {
-  const billed = Number(row.BilledCost ?? row.EffectiveCost ?? 0)
-  if (!Number.isFinite(billed) || billed === 0) return null
-  // FOCUS BilledCost is a positive decimal for a cost (an expense) → matches
-  // our expense-positive convention.
-  const amountCents = Math.round(billed * 100)
-  const start = (row.ChargePeriodStart ?? '').slice(0, 10) || new Date().toISOString().slice(0, 10)
+  const effective = num(row.EffectiveCost)
+  const billed = num(row.BilledCost)
+  // Skip ONLY when there is no cost on either axis.
+  if (effective === 0 && billed === 0) return null
+
+  // EffectiveCost is the primary amount (the consumption signal); BilledCost is
+  // the raw (what was actually invoiced — often $0 under the Pro plan).
+  const amountCents = Math.round(effective * 100)
+  const rawAmountCents = Math.round(billed * 100)
+
+  const start =
+    (row.ChargePeriodStart ?? '').slice(0, 10) || todayUtc()
   const end = (row.ChargePeriodEnd ?? '').slice(0, 10) || start
-  const projectId = tagOf(row, 'ProjectId') ?? 'unknown'
+  const projectId = tagOf(row, 'ProjectId') ?? 'platform'
   const service = row.ServiceName ?? 'Vercel'
+  const chargeCategory = row.ChargeCategory ?? 'Usage'
+
+  // Stable, deterministic external_id — NO per-pull index. A given project's
+  // service charge for a given period+category is one economic event; re-pulling
+  // the same window must upsert, not duplicate.
+  const externalId = `vercel:${projectId}:${service}:${start}:${chargeCategory}`
+
+  const qty = num(row.ConsumedQuantity)
+  const unit = row.ConsumedUnit?.trim()
+  const descBase = row.ChargeDescription ?? service
+  const description =
+    qty > 0 && unit ? `${descBase} (${qty} ${unit})` : descBase
+
   return {
-    external_id: `vercel:${projectId}:${service}:${start}:${index}`,
+    external_id: externalId,
     source: 'vercel',
     account_ref: accountRef,
     amount_cents: amountCents,
-    raw_amount_cents: amountCents,
+    raw_amount_cents: rawAmountCents,
     raw_sign_source: 'vercel-focus',
     currency: (row.BillingCurrency ?? 'usd').toLowerCase(),
     occurred_on: end,
     posted_on: end,
     merchant_hint: 'Vercel',
-    description: row.ChargeDescription ?? service,
-    category_hint: 'Software & SaaS',
+    description,
+    category_hint: categoryHint,
   }
 }
 
@@ -104,6 +171,10 @@ export interface VercelIngestResult {
   rows: number
   ingested: number
   mapped: number
+  /** Rows routed to the Unallocated / Platform project (team-level / unmapped). */
+  unallocated: number
+  from?: string
+  to?: string
   error?: string
 }
 
@@ -134,6 +205,34 @@ async function ensureVercelAccount(ownerId: string): Promise<string> {
   return (created.data as { id: string }).id
 }
 
+/**
+ * The catch-all project for team-level / unmapped Vercel spend (the $4.50 Pro
+ * fee, Speed Insights, Blob, and any project not yet in external_project_map).
+ * NOT the Personal project — this is explicitly a platform bucket so it reads
+ * correctly in the per-project P&L.
+ */
+async function ensureUnallocatedProject(ownerId: string): Promise<Project> {
+  const existing = await getProjectBySlug(ownerId, UNALLOCATED_SLUG)
+  if (existing) return existing
+  return createProject(ownerId, {
+    name: UNALLOCATED_NAME,
+    slug: UNALLOCATED_SLUG,
+    color: '#64748b',
+    description: 'Team-level platform spend not attributable to a single project.',
+  })
+}
+
+/** Resolve a system category by label → its id (system rows have owner_id null). */
+async function resolveCategoryId(label: string): Promise<string | null> {
+  const { data } = await db()
+    .from('categories')
+    .select('id')
+    .is('owner_id', null)
+    .eq('label', label)
+    .maybeSingle()
+  return (data as { id: string } | null)?.id ?? null
+}
+
 /** Map Vercel's native ProjectId → a foundr project via external_project_map. */
 async function mapVercelProject(
   ownerId: string,
@@ -154,15 +253,31 @@ async function mapVercelProject(
 }
 
 /**
- * Pull the Vercel FOCUS billing export and ingest it as provider_invoices +
- * canonical transactions, mapping each record to a foundr project by its native
- * Vercel ProjectId (external_project_map). Unmapped records fall to Personal.
+ * Pull the Vercel FOCUS billing export for a window and ingest it as a
+ * provider_invoices row + canonical transactions, mapping each record to a
+ * foundr project by its native Vercel ProjectId (external_project_map). Rows
+ * with empty/unmapped Tags fall to the 'Unallocated / Platform' project.
+ *
+ * @param from inclusive window start, ISO YYYY-MM-DD. Default: current month-to-date.
+ * @param to   inclusive window end, ISO YYYY-MM-DD. Default: today (UTC).
  */
 export async function fetchAndIngestVercelFocus(
   ownerId: string,
+  from?: string,
+  to?: string,
   token?: string,
 ): Promise<VercelIngestResult> {
-  const result: VercelIngestResult = { ok: false, rows: 0, ingested: 0, mapped: 0 }
+  const windowFrom = from ?? monthStartUtc()
+  const windowTo = to ?? todayUtc()
+  const result: VercelIngestResult = {
+    ok: false,
+    rows: 0,
+    ingested: 0,
+    mapped: 0,
+    unallocated: 0,
+    from: windowFrom,
+    to: windowTo,
+  }
   const authToken = token ?? process.env.VERCEL_TOKEN
   if (!authToken) {
     result.error = 'vercel_not_configured'
@@ -171,14 +286,28 @@ export async function fetchAndIngestVercelFocus(
 
   try {
     const url = new URL(FOCUS_ENDPOINT)
+    // from/to are REQUIRED by /v1/billing/charges.
+    url.searchParams.set('from', windowFrom)
+    url.searchParams.set('to', windowTo)
     if (process.env.VERCEL_TEAM_ID) url.searchParams.set('teamId', process.env.VERCEL_TEAM_ID)
+
     const resp = await fetch(url, {
-      headers: { Authorization: `Bearer ${authToken}`, Accept: 'application/x-ndjson, application/json' },
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+        Accept: 'application/x-ndjson, application/json',
+      },
     })
+    // An empty / future window returns 404 — that is a clean empty result, not
+    // a failure. Surface other HTTP errors.
+    if (resp.status === 404) {
+      result.ok = true
+      return result
+    }
     if (!resp.ok) {
       result.error = `vercel_focus_http_${resp.status}`
       return result
     }
+
     const body = await resp.text()
     const rows = parseFocusJsonl(body)
     result.rows = rows.length
@@ -188,44 +317,73 @@ export async function fetchAndIngestVercelFocus(
     }
 
     const accountRef = await ensureVercelAccount(ownerId)
-    const personal = await ensurePersonalProject(ownerId)
+    const unallocated = await ensureUnallocatedProject(ownerId)
+    // Resolved category UUID drives the allocation; the LABEL drives the hint.
+    const categoryId = await resolveCategoryId(VERCEL_CATEGORY_LABEL)
+    const categoryHint = categoryId ? VERCEL_CATEGORY_LABEL : null
     const projectCache = new Map<string, string | null>()
 
-    // Aggregate one provider_invoices row for the pull (line items = services).
-    const lineItems: { description: string; amount_cents: number }[] = []
+    // Aggregate one provider_invoices row for this window. Each line item keeps
+    // the Vercel ProjectId so the invoice is project-attributable downstream.
+    const lineItems: {
+      description: string
+      amount_cents: number
+      raw_amount_cents: number
+      project_id: string | null
+    }[] = []
+    // Track the project ids actually touched so the invoice can carry a sensible
+    // external_project_ref (single-project window → that project; mixed → null).
+    const touchedExternalProjects = new Set<string>()
     let total = 0
 
-    let index = 0
     for (const row of rows) {
-      const raw = focusRowToRaw(row, accountRef, index++)
+      const raw = focusRowToRaw(row, accountRef, categoryHint)
       if (!raw) continue
+
       const externalProjectId = tagOf(row, 'ProjectId')
-      let projectId = personal.id
+      let projectId = unallocated.id
       if (externalProjectId) {
         const mapped = await mapVercelProject(ownerId, externalProjectId, projectCache)
         if (mapped) {
           projectId = mapped
           result.mapped++
+          touchedExternalProjects.add(externalProjectId)
+        } else {
+          // Tagged but not yet mapped → Unallocated / Platform.
+          result.unallocated++
         }
+      } else {
+        // Empty Tags ({}) → team-level platform spend.
+        result.unallocated++
       }
-      await insertCanonicalTransaction(ownerId, raw, { projectId })
+
+      await insertCanonicalTransaction(ownerId, raw, { projectId, categoryId })
       result.ingested++
-      lineItems.push({ description: raw.description ?? 'Vercel', amount_cents: raw.amount_cents })
+      lineItems.push({
+        description: raw.description ?? 'Vercel',
+        amount_cents: raw.amount_cents,
+        raw_amount_cents: raw.raw_amount_cents,
+        project_id: externalProjectId,
+      })
       total += raw.amount_cents
     }
 
     if (lineItems.length > 0) {
+      const externalProjectRef =
+        touchedExternalProjects.size === 1 ? [...touchedExternalProjects][0] : null
       await db()
         .from('provider_invoices')
         .insert({
           owner_id: ownerId,
           financial_account_id: accountRef,
           provider: 'vercel',
-          external_invoice_id: `vercel-focus-${new Date().toISOString().slice(0, 10)}`,
-          period_start: new Date().toISOString().slice(0, 10),
-          period_end: new Date().toISOString().slice(0, 10),
+          external_invoice_id: `vercel-focus-${windowFrom}_${windowTo}`,
+          // The ACTUAL window — not today.
+          period_start: windowFrom,
+          period_end: windowTo,
           total_cents: total,
           line_items: lineItems,
+          external_project_ref: externalProjectRef,
         })
     }
 

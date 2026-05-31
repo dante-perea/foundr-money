@@ -108,7 +108,7 @@ export interface ProjectPnl {
 /** Source-agnostic ingest row. Every adapter maps INTO this. */
 export interface RawTransaction {
   external_id: string
-  source: 'plaid' | 'csv' | 'invoice' | 'manual' | 'stripe' | 'vercel'
+  source: 'plaid' | 'csv' | 'invoice' | 'manual' | 'stripe' | 'vercel' | 'openai' | 'anthropic'
   account_ref: string // financial_account_id
   amount_cents: number // NORMALIZED: expense = positive
   raw_amount_cents: number

@@ -1,10 +1,13 @@
 'use client'
 
+import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import type { AccountProvider } from '@/lib/money/types'
 import { McpSection, type AgentKeyView } from '@/components/connect/McpSection'
 import { PlaidConnectButton } from '@/components/connect/PlaidConnectButton'
 import { ProviderCard, PROVIDERS } from '@/components/connect/ProviderCard'
 import { ExportSection } from '@/components/connect/ExportSection'
+import { syncEcosystemAction, type SyncEcosystemResult } from './actions'
 
 export interface ConnectedAccountView {
   id: string
@@ -85,6 +88,7 @@ export function ConnectClient({
             foundr project once and the line items sort themselves forever.
           </p>
         </div>
+        <EcosystemSyncSection />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {PROVIDERS.map((spec) => (
             <ProviderCard
@@ -140,6 +144,81 @@ export function ConnectClient({
 
       {/* Tax-aware export */}
       <ExportSection />
+    </div>
+  )
+}
+
+/**
+ * One-tap sync for the whole foundr.* ecosystem: ensures every project exists +
+ * is mapped to its Vercel project id, pulls the real Vercel FOCUS billing
+ * export, ingests it per-project, and reconciles invoices to card charges.
+ * Optimistic-by-nature: the action returns a summary; on success we
+ * router.refresh() to reconcile the server-rendered lists. No revalidateTag.
+ */
+function EcosystemSyncSection() {
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+  const [result, setResult] = useState<SyncEcosystemResult | null>(null)
+
+  function onSync() {
+    setResult(null)
+    startTransition(async () => {
+      const res = await syncEcosystemAction()
+      setResult(res)
+      if (res.ok) router.refresh()
+    })
+  }
+
+  return (
+    <div className="rounded-md border border-line bg-surface p-6 transition hover:border-line-strong">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="font-display text-lg font-semibold tracking-tight text-ink">
+            Sync ecosystem spend
+          </p>
+          <p className="mt-1 max-w-prose text-sm leading-relaxed text-muted">
+            Pull this month&apos;s real Vercel usage across all 14 products, map each line item to
+            its foundr project, and reconcile the invoices to your card.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onSync}
+          disabled={isPending}
+          className="inline-flex shrink-0 items-center justify-center rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-white transition hover:bg-accent-hover disabled:cursor-wait disabled:opacity-70"
+        >
+          {isPending ? 'Syncing…' : 'Sync ecosystem spend'}
+        </button>
+      </div>
+
+      {result ? (
+        result.ok ? (
+          <p className="mt-4 rounded-md border border-line bg-bg-alt px-4 py-3 text-sm text-ink">
+            Synced.{' '}
+            <span className="font-mono text-subtle">
+              {result.projectsCreated} {result.projectsCreated === 1 ? 'project' : 'projects'} mapped
+              {' · '}
+              {result.ingested} {result.ingested === 1 ? 'line item' : 'line items'} ingested
+            </span>
+          </p>
+        ) : (
+          <div className="mt-4 rounded-md border border-line bg-bg-alt px-4 py-3 text-sm text-ink">
+            <p>
+              Synced with issues.{' '}
+              <span className="font-mono text-subtle">
+                {result.projectsCreated} mapped · {result.ingested} ingested
+              </span>
+            </p>
+            {result.errors.length > 0 ? (
+              <ul className="mt-2 list-disc space-y-0.5 pl-5 font-mono text-xs text-subtle">
+                {result.errors.map((e, i) => (
+                  <li key={i}>{e}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        )
+      ) : null}
     </div>
   )
 }
