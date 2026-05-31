@@ -1,7 +1,7 @@
 // src/lib/mcp/money-server.ts
 //
 // MCP server factory for the foundr.money endpoint (/api/mcp/money).
-// Stateless, owner-scoped. Registers SIX tools; every call enforces scope,
+// Stateless, owner-scoped. Registers SEVEN tools; every call enforces scope,
 // derives ownerId from ctx (never from args), and audit-logs into mcp_call_log.
 import { z } from 'zod'
 import { McpServer, type ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -12,6 +12,7 @@ import { createProjectInput, runCreateProject } from './tools/create-project'
 import { projectPnlInput, runProjectPnl } from './tools/project-pnl'
 import { logExpenseInput, runLogExpense } from './tools/log-expense'
 import { importInvoiceInput, runImportInvoice } from './tools/import-invoice'
+import { ecosystemSpendInput, runEcosystemSpend } from './tools/ecosystem-spend'
 
 const INSTRUCTIONS = `foundr.money — per-project P&L for the founder running several things on one card. No legal entity required: every charge is tagged to a project, and burn / income / net / MRR roll up per project.
 
@@ -24,6 +25,7 @@ Tools (and the scope each needs):
 - tag_transaction (mcp:money:write) — assign a charge to a project; supports a partial split (remainder stays Personal).
 - create_project (mcp:money:write) — add a project; re-creating an existing slug is a no-op success.
 - project_pnl (mcp:money:read) — burn / income / net / MRR per project for a period.
+- ecosystem_spend (mcp:money:read) — whole-ecosystem burn ranked per project (highest burn first) plus a portfolio total, for a period. Use for "what's my burn this month?".
 - log_expense (mcp:money:write) — record a manual expense against a project.
 - import_invoice (mcp:money:write) — parse a Stripe-shaped provider invoice (OpenAI/Anthropic/Cursor/Vercel/Supabase/Stripe) into per-line-item charges, optionally tag to a project, then reconcile against the paying card charge so it doesn't double-count.
 
@@ -112,6 +114,17 @@ export function createMoneyMcpServer(ctx: MoneyToolCtx): McpServer {
       inputSchema: projectPnlInput,
     },
     runProjectPnl,
+  )
+
+  register(
+    'ecosystem_spend',
+    {
+      title: 'Ecosystem spend',
+      description:
+        'READ (scope mcp:money:read). Whole-ecosystem burn ranked per project (highest burn first) — project name, burn (expense), net, MRR — plus a portfolio total, over last30 | mtd | ytd | all. Use to answer "what\'s my ecosystem burn this month?".',
+      inputSchema: ecosystemSpendInput,
+    },
+    runEcosystemSpend,
   )
 
   register(

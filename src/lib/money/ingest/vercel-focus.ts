@@ -96,12 +96,24 @@ function monthStartUtc(): string {
  *   • amount_cents     ← EffectiveCost (the true per-project consumption signal)
  *   • raw_amount_cents ← BilledCost    (what actually hit the invoice; $0 under Pro)
  * Both stay expense-positive (FOCUS costs are positive decimals for spend).
+ *
+ * The external_id is WINDOW-coarse, NOT per-day: every (project, service,
+ * category) row in the pulled window collapses onto the SAME external_id so the
+ * ingest loop can SUM the per-row amounts into one canonical event before the
+ * insert (see fetchAndIngestVercelFocus). A per-day id would (a) explode the
+ * insert count toward the ~38k raw rows and (b) make fm_insert_transaction's
+ * UPSERT overwrite rather than accumulate same-day rows. occurred_on/posted_on
+ * are pinned to the window end so the summed event lands on a single date.
  */
 function focusRowToRaw(
   row: FocusRow,
   accountRef: string,
   /** Category LABEL (e.g. 'Software & SaaS') for the classifier hint — NOT the id. */
   categoryHint: string | null,
+  /** Window start, ISO YYYY-MM-DD — folded into the external_id. */
+  windowFrom: string,
+  /** Window end, ISO YYYY-MM-DD — folded into the external_id + used as the date. */
+  windowTo: string,
 ): RawTransaction | null {
   const effective = num(row.EffectiveCost)
   const billed = num(row.BilledCost)
@@ -113,17 +125,15 @@ function focusRowToRaw(
   const amountCents = Math.round(effective * 100)
   const rawAmountCents = Math.round(billed * 100)
 
-  const start =
-    (row.ChargePeriodStart ?? '').slice(0, 10) || todayUtc()
-  const end = (row.ChargePeriodEnd ?? '').slice(0, 10) || start
   const projectId = tagOf(row, 'ProjectId') ?? 'platform'
   const service = row.ServiceName ?? 'Vercel'
   const chargeCategory = row.ChargeCategory ?? 'Usage'
 
-  // Stable, deterministic external_id — NO per-pull index. A given project's
-  // service charge for a given period+category is one economic event; re-pulling
-  // the same window must upsert, not duplicate.
-  const externalId = `vercel:${projectId}:${service}:${start}:${chargeCategory}`
+  // Stable, deterministic, WINDOW-based external_id — NOT per-day. All rows for a
+  // given (project, service, category) within the pulled window share this id so
+  // the ingest loop sums them into ONE canonical economic event; re-pulling the
+  // same window upserts (replaces) that single summed row rather than duplicating.
+  const externalId = `vercel:${windowFrom}_${windowTo}:${projectId}:${service}:${chargeCategory}`
 
   const qty = num(row.ConsumedQuantity)
   const unit = row.ConsumedUnit?.trim()
@@ -139,8 +149,8 @@ function focusRowToRaw(
     raw_amount_cents: rawAmountCents,
     raw_sign_source: 'vercel-focus',
     currency: (row.BillingCurrency ?? 'usd').toLowerCase(),
-    occurred_on: end,
-    posted_on: end,
+    occurred_on: windowTo,
+    posted_on: windowTo,
     merchant_hint: 'Vercel',
     description,
     category_hint: categoryHint,
@@ -336,18 +346,42 @@ export async function fetchAndIngestVercelFocus(
     const touchedExternalProjects = new Set<string>()
     let total = 0
 
+    // ── Phase 1: AGGREGATE before inserting ──────────────────────────────────
+    // The raw FOCUS export is window-coarse but row-fine: ~38k rows, one per
+    // (project, service, category, DAY, sub-meter). Inserting per row would (a)
+    // fire ~38k RPC round-trips → timeout, and (b) collide on a window-based
+    // external_id where fm_insert_transaction UPSERTS — so we'd keep only the
+    // LAST row's amount instead of the sum, badly undercounting per-project burn.
+    //
+    // Instead we collapse all rows sharing an external_id into ONE entry, SUMMING
+    // amount_cents + raw_amount_cents. This drops ~38k rows → one entry per
+    // (project, service, category) for the window (~hundreds). The Vercel
+    // ProjectId ('ext') is captured once from the first row of each group — it is
+    // invariant within a group since it is part of the external_id key.
+    const groups = new Map<string, { raw: RawTransaction; ext: string | null }>()
     for (const row of rows) {
-      const raw = focusRowToRaw(row, accountRef, categoryHint)
+      const raw = focusRowToRaw(row, accountRef, categoryHint, windowFrom, windowTo)
       if (!raw) continue
+      const existing = groups.get(raw.external_id)
+      if (existing) {
+        existing.raw.amount_cents += raw.amount_cents
+        existing.raw.raw_amount_cents += raw.raw_amount_cents
+      } else {
+        groups.set(raw.external_id, { raw, ext: tagOf(row, 'ProjectId') })
+      }
+    }
 
-      const externalProjectId = tagOf(row, 'ProjectId')
+    // ── Phase 2: insert ONCE per aggregated entry ────────────────────────────
+    // Counts (ingested/mapped/unallocated) are tracked at the AGGREGATED grain —
+    // one canonical transaction per (project, service, category) for the window.
+    for (const { raw, ext } of groups.values()) {
       let projectId = unallocated.id
-      if (externalProjectId) {
-        const mapped = await mapVercelProject(ownerId, externalProjectId, projectCache)
+      if (ext) {
+        const mapped = await mapVercelProject(ownerId, ext, projectCache)
         if (mapped) {
           projectId = mapped
           result.mapped++
-          touchedExternalProjects.add(externalProjectId)
+          touchedExternalProjects.add(ext)
         } else {
           // Tagged but not yet mapped → Unallocated / Platform.
           result.unallocated++
@@ -363,7 +397,7 @@ export async function fetchAndIngestVercelFocus(
         description: raw.description ?? 'Vercel',
         amount_cents: raw.amount_cents,
         raw_amount_cents: raw.raw_amount_cents,
-        project_id: externalProjectId,
+        project_id: ext,
       })
       total += raw.amount_cents
     }

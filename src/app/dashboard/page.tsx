@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { requireOwnerId } from '@/lib/money/owner'
 import { portfolioPnl, portfolioTotals, type Period } from '@/lib/money/pnl'
 import { listUntagged } from '@/lib/money/transactions'
@@ -99,7 +100,13 @@ export default async function DashboardOverview({
           </h1>
           <p className="mt-3 max-w-xl text-sm text-muted">
             {totals.project_count} {totals.project_count === 1 ? 'project' : 'projects'} on one balance.
-            See which one caused that bill.
+            See which one caused that bill.{' '}
+            <Link
+              href="/dashboard/ecosystem"
+              className="text-accent transition hover:text-accent-hover"
+            >
+              See per-product burn →
+            </Link>
           </p>
         </div>
         <PeriodSelector active={period} />
