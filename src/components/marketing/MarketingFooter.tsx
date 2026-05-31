@@ -17,6 +17,12 @@ export function MarketingFooter() {
           <Link href="/sign-up" className="transition hover:text-ink">
             Get started
           </Link>
+          <Link href="/privacy" className="transition hover:text-ink">
+            Privacy
+          </Link>
+          <Link href="/terms" className="transition hover:text-ink">
+            Terms
+          </Link>
         </nav>
       </div>
       <div className="border-t border-line">
